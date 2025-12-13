@@ -1,3 +1,7 @@
-# Restore Command
+Restore Kubernetes resources from a previously created backup
 
-Restore command not available yet.
+Usage:
+  kubectl-backup restore [flags]
+
+Flags:
+  -h, --help   help for restore

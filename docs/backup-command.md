@@ -1,3 +1,7 @@
-# Backup Command
+Create a backup of Kubernetes resources from the specified namespace or cluster
 
-Backup command not available yet.
+Usage:
+  kubectl-backup backup [flags]
+
+Flags:
+  -h, --help   help for backup
