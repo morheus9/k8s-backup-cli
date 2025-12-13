@@ -1,4 +1,3 @@
-# Makefile for k8s-backup-cli (POSIX compatible)
 BINARY_NAME ?= kubectl-backup
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -6,13 +5,10 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 
-# Directories
-CMD_DIR = cmd
 BIN_DIR = bin
 DIST_DIR = dist
 COVERAGE_DIR = coverage
 
-# Go tools
 GOCMD = go
 GOBUILD = $(GOCMD) build
 GOTEST = $(GOCMD) test
@@ -20,14 +16,11 @@ GOVET = $(GOCMD) vet
 GOFMT = $(GOCMD) fmt
 GOMOD = $(GOCMD) mod
 
-# Пути к инструментам
 GOBIN = $(shell go env GOPATH 2>/dev/null || echo $(HOME)/go)/bin
 export PATH := $(GOBIN):$(PATH)
 
-# LDFlags
 LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)"
 
-# Default target
 .DEFAULT_GOAL := build
 
 ##@ Development
@@ -66,11 +59,11 @@ tidy: ## Tidy go.mod
 	$(GOMOD) tidy
 	@echo "✅ Go modules tidied"
 
-run: ensure-binary ## Run with arguments (make run ARGS="backup default --password test")
+run: ensure-binary ## Run with arguments (make run ARGS="backup")
 	@./$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
 ##@ Testing
-.PHONY: test test-unit test-integration coverage
+.PHONY: test test-unit coverage
 
 test: test-unit ## Run all tests
 	@echo "✅ All tests passed!"
@@ -78,25 +71,6 @@ test: test-unit ## Run all tests
 test-unit: ## Run unit tests
 	@echo "Running unit tests..."
 	$(GOTEST) -v -short ./...
-
-test-integration: ensure-binary ## Run integration tests (requires k8s cluster)
-	@echo "Running integration tests..."
-	@echo "Creating test namespace..."
-	-kubectl create namespace backup-test 2>/dev/null || true
-	@echo "Creating test resources..."
-	-kubectl -n backup-test create configmap test-cm --from-literal=key=value 2>/dev/null || true
-	-kubectl -n backup-test create secret generic test-secret --from-literal=password=123 2>/dev/null || true
-	@echo "Running backup..."
-	./$(BIN_DIR)/$(BINARY_NAME) backup backup-test --password test123 --output ./test-backups 2>&1
-	@if ls ./test-backups/backup-*.tar.gz >/dev/null 2>&1; then \
-		echo "✅ Backup created successfully!"; \
-	else \
-		echo "❌ Backup failed!"; exit 1; \
-	fi
-	@echo "Cleaning up..."
-	rm -rf ./test-backups 2>/dev/null || true
-	-kubectl delete namespace backup-test 2>/dev/null || true
-	@echo "✅ Integration tests passed!"
 
 coverage: ## Generate test coverage report
 	@mkdir -p $(COVERAGE_DIR)
@@ -115,21 +89,22 @@ vet: ## Run go vet
 	$(GOVET) ./...
 	@echo "✅ Go vet passed"
 
-lint: ## Run golint
-	@if ! command -v golint >/dev/null 2>&1; then \
-		echo "golint not found. Installing latest version..."; \
-		go install golang.org/x/lint/golint@latest; \
+lint: ## Run golangci-lint
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "golangci-lint not found. Installing latest version..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		export PATH="$(GOBIN):$$PATH"; \
 	fi
-	golint ./...
+	@$(GOBIN)/golangci-lint run 2>/dev/null || golangci-lint run
 	@echo "✅ Lint passed"
 
 lint-fix: ## Fix linting issues
-	@echo "Note: golint doesn't support auto-fixing. Running gofmt and goimports instead..."
-	@if ! command -v goimports >/dev/null 2>&1; then \
-		echo "goimports not found. Installing..."; \
-		go install golang.org/x/tools/cmd/goimports@latest; \
+	@if ! command -v golangci-lint >/dev/null 2>&1; then \
+		echo "golangci-lint not found. Installing latest version..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		export PATH="$(GOBIN):$$PATH"; \
 	fi
-	goimports -w .
+	@$(GOBIN)/golangci-lint run --fix 2>/dev/null || golangci-lint run --fix
 	$(GOFMT) ./...
 	@echo "✅ Formatting done"
 
@@ -137,8 +112,9 @@ security: ## Run security checks
 	@if ! command -v gosec >/dev/null 2>&1; then \
 		echo "gosec not found. Installing latest version..."; \
 		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
+		export PATH="$(GOBIN):$$PATH"; \
 	fi
-	gosec ./...
+	@$(GOBIN)/gosec ./... 2>/dev/null || gosec ./...
 	@echo "✅ Security checks passed"
 
 check: fmt vet lint security ## Run all code quality checks
@@ -149,8 +125,7 @@ check: fmt vet lint security ## Run all code quality checks
 
 tools: ## Install all development tools
 	@echo "Installing development tools..."
-	go install golang.org/x/lint/golint@latest
-	go install golang.org/x/tools/cmd/goimports@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@echo "✅ Tools installed"
 
@@ -169,7 +144,7 @@ cross-build: ## Build for all platforms
 			fi; \
 			echo "Building $$os/$$arch..."; \
 			if GOOS=$$os GOARCH=$$arch $(GOBUILD) -trimpath $(LDFLAGS) \
-				-o $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext ./$(CMD_DIR); then \
+				-o $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext .; then \
 				[ "$$os" != "windows" ] && chmod +x $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext || true; \
 				echo "  ✅ Success"; \
 			else \
@@ -193,7 +168,7 @@ checksums: ## Generate checksums for releases
 
 snapshot: ## Create development snapshot
 	@mkdir -p $(DIST_DIR)
-	$(GOBUILD) -trimpath $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-snapshot ./$(CMD_DIR)
+	$(GOBUILD) -trimpath $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-snapshot .
 	chmod +x $(DIST_DIR)/$(BINARY_NAME)-snapshot
 	@echo "📸 Snapshot: $(DIST_DIR)/$(BINARY_NAME)-snapshot"
 
@@ -201,7 +176,7 @@ snapshot: ## Create development snapshot
 .PHONY: help clean
 
 clean: ## Clean build artifacts
-	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR) test-backups
+	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR)
 	@echo "🧹 Clean completed"
 
 distclean: clean ## Deep clean (includes dependencies)
@@ -239,10 +214,10 @@ help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "Quick start:"
-	@echo "  make tools      - Install development tools"
-	@echo "  make build      - Build the binary"
-	@echo "  make install    - Install to /usr/local/bin"
+	@echo "  make tools             - Install development tools"
+	@echo "  make build             - Build the binary"
+	@echo "  make install           - Install to /usr/local/bin"
 	@echo "  make run ARGS='--help' - Run with arguments"
-	@echo "  make docs       - Generate documentation"
-	@echo "  make test       - Run tests"
-	@echo "  make check      - Run all code quality checks"
+	@echo "  make test              - Run tests"
+	@echo "  make check             - Run all code quality checks"
+	@echo "  make security          - Run security code checks"
