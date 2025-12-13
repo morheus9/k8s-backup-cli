@@ -51,3 +51,7 @@ make run
 ```
 kubectl get crd | grep backupschedule
 ```
+
+make generate
+make manifests
+make run
