@@ -47,7 +47,7 @@ make install
 ```
 make run
 ```
-Checking
+##### Checking
 ```
 kubectl get crd | grep backupschedule
 ```
