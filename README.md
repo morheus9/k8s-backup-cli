@@ -1,57 +1,22 @@
 ## Autobackup manifests operator
 
+# Сборка и установка
+make build           # Собрать бинарник
+make install         # Установить в систему
 
+# Разработка
+make dev             # Запуск с hot-reload (нужен air)
+make test            # Запуск unit-тестов
+make test-integration # Интеграционные тесты (требует k8s)
 
+# Качество кода
+make check           # Все проверки: fmt, vet, lint, security
+make lint-fix        # Автоисправление линтинга
 
-______________________________________________________________________
-## For developer
+# Релиз
+make release         # Сборка для всех платформ + checksums
+make snapshot        # Создать development snapshot
 
-### 1. Install utilities
-
-- kubebuilder
-```
-go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-
-kubebuilder init --domain example.com --repo github.com/morheus9/autobackup-manifest-operator
-kubebuilder create api --group backup --version v1alpha1 --kind BackupSchedule
-```
-- controller-gen
-```
-make controller-gen
-GOBIN=/home/pi/go/bin go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-```
-- kustomize
-```
-make kustomize
-sudo apt install kustomize
-```
-### 2. Code generation
-
-##### Генерирует код на основе маркеров в types.go
-```
-make generate
-```
-##### Generates CRD, RBAC, Webhook manifests
-```
-make manifests
-```
-### 3. Check build
-```
-make build
-```
-### 4. Installing in cluster
-```
-make install
-```
-### 5. Start in development mode
-```
-make run
-```
-##### Checking
-```
-kubectl get crd | grep backupschedule
-```
-
-make generate
-make manifests
-make run
+# Очистка
+make clean           # Очистка артефактов
+make distclean       # Глубокая очистка (кэши)

@@ -1,250 +1,248 @@
-# Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+# Makefile for k8s-backup-cli (POSIX compatible)
+BINARY_NAME ?= kubectl-backup
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
 
-# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
-ifeq (,$(shell go env GOBIN))
-GOBIN=$(shell go env GOPATH)/bin
-else
-GOBIN=$(shell go env GOBIN)
-endif
+# Directories
+CMD_DIR = cmd
+BIN_DIR = bin
+DIST_DIR = dist
+COVERAGE_DIR = coverage
 
-# CONTAINER_TOOL defines the container tool to be used for building images.
-# Be aware that the target commands are only tested with Docker which is
-# scaffolded by default. However, you might want to replace it to use other
-# tools. (i.e. podman)
-CONTAINER_TOOL ?= docker
+# Go tools
+GOCMD = go
+GOBUILD = $(GOCMD) build
+GOTEST = $(GOCMD) test
+GOVET = $(GOCMD) vet
+GOFMT = $(GOCMD) fmt
+GOMOD = $(GOCMD) mod
 
-# Setting SHELL to bash allows bash commands to be executed by recipes.
-# Options are set to exit when a recipe line exits non-zero or a piped command fails.
-SHELL = /usr/bin/env bash -o pipefail
-.SHELLFLAGS = -ec
+# Пути к инструментам
+GOBIN = $(shell go env GOPATH 2>/dev/null || echo $(HOME)/go)/bin
+export PATH := $(GOBIN):$(PATH)
 
-.PHONY: all
-all: build
+# LDFlags
+LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)"
 
-##@ General
-
-# The help target prints out all targets with their descriptions organized
-# beneath their categories. The categories are represented by '##@' and the
-# target descriptions by '##'. The awk command is responsible for reading the
-# entire set of makefiles included in this invocation, looking for lines of the
-# file as xyz: ## something, and then pretty-format the target and help. Then,
-# if there's a line with ##@ something, that gets pretty-printed as a category.
-# More info on the usage of ANSI control characters for terminal formatting:
-# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
-# More info on the awk command:
-# http://linuxcommand.org/lc3_adv_awk.php
-
-.PHONY: help
-help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+# Default target
+.DEFAULT_GOAL := build
 
 ##@ Development
+.PHONY: build install deps tidy run ensure-binary
 
-.PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-
-.PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-.PHONY: fmt
-fmt: ## Run go fmt against code.
-	go fmt ./...
-
-.PHONY: vet
-vet: ## Run go vet against code.
-	go vet ./...
-
-.PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
-
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= autobackup-manifest-operator-test-e2e
-
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
+build: ## Build binary for current platform
+	@echo "Building $(BINARY_NAME) $(VERSION) for $(GOOS)/$(GOARCH)..."
+	@mkdir -p $(BIN_DIR)
+	@if $(GOBUILD) -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./$(CMD_DIR); then \
+		chmod +x $(BIN_DIR)/$(BINARY_NAME); \
+		echo "✅ Binary created: $(BIN_DIR)/$(BINARY_NAME)"; \
+	else \
+		echo "❌ Build failed"; \
 		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
+	fi
 
-.PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+ensure-binary: ## Ensure binary exists and is executable
+	@if [ ! -f $(BIN_DIR)/$(BINARY_NAME) ] || [ ! -x $(BIN_DIR)/$(BINARY_NAME) ]; then \
+		$(MAKE) build; \
+	fi
 
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+install: build ## Install binary to system path
+	@echo "Installing to /usr/local/bin..."
+	@if [ -w /usr/local/bin ]; then \
+		install -m 0755 $(BIN_DIR)/$(BINARY_NAME) /usr/local/bin/; \
+	else \
+		sudo install -m 0755 $(BIN_DIR)/$(BINARY_NAME) /usr/local/bin/; \
+	fi
+	@echo "✅ Installed! Run with: $(BINARY_NAME) --help"
 
-.PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter
-	"$(GOLANGCI_LINT)" run
+deps: ## Download dependencies
+	$(GOMOD) download
+	@echo "✅ Dependencies downloaded"
 
-.PHONY: lint-fix
-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
-	"$(GOLANGCI_LINT)" run --fix
+tidy: ## Tidy go.mod
+	$(GOMOD) tidy
+	@echo "✅ Go modules tidied"
 
-.PHONY: lint-config
-lint-config: golangci-lint ## Verify golangci-lint linter configuration
-	"$(GOLANGCI_LINT)" config verify
+run: ensure-binary ## Run with arguments (make run ARGS="backup default --password test")
+	@./$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
 
-##@ Build
+##@ Testing
+.PHONY: test test-unit test-integration coverage
 
-.PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+test: test-unit ## Run all tests
+	@echo "✅ All tests passed!"
 
-.PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+test-unit: ## Run unit tests
+	@echo "Running unit tests..."
+	$(GOTEST) -v -short ./...
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-.PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+test-integration: ensure-binary ## Run integration tests (requires k8s cluster)
+	@echo "Running integration tests..."
+	@echo "Creating test namespace..."
+	-kubectl create namespace backup-test 2>/dev/null || true
+	@echo "Creating test resources..."
+	-kubectl -n backup-test create configmap test-cm --from-literal=key=value 2>/dev/null || true
+	-kubectl -n backup-test create secret generic test-secret --from-literal=password=123 2>/dev/null || true
+	@echo "Running backup..."
+	./$(BIN_DIR)/$(BINARY_NAME) backup backup-test --password test123 --output ./test-backups 2>&1
+	@if ls ./test-backups/backup-*.tar.gz >/dev/null 2>&1; then \
+		echo "✅ Backup created successfully!"; \
+	else \
+		echo "❌ Backup failed!"; exit 1; \
+	fi
+	@echo "Cleaning up..."
+	rm -rf ./test-backups 2>/dev/null || true
+	-kubectl delete namespace backup-test 2>/dev/null || true
+	@echo "✅ Integration tests passed!"
 
-.PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	$(CONTAINER_TOOL) push ${IMG}
+coverage: ## Generate test coverage report
+	@mkdir -p $(COVERAGE_DIR)
+	$(GOTEST) -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	@echo "📊 Coverage report: $(COVERAGE_DIR)/coverage.html"
 
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
-# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-.PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name autobackup-manifest-operator-builder
-	$(CONTAINER_TOOL) buildx use autobackup-manifest-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm autobackup-manifest-operator-builder
-	rm Dockerfile.cross
+##@ Code Quality
+.PHONY: fmt vet lint lint-fix security check
 
-.PHONY: build-installer
-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
-	mkdir -p dist
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build config/default > dist/install.yaml
+fmt: ## Format Go code
+	$(GOFMT) ./...
+	@echo "✅ Code formatted"
 
-##@ Deployment
+vet: ## Run go vet
+	$(GOVET) ./...
+	@echo "✅ Go vet passed"
 
-ifndef ignore-not-found
-  ignore-not-found = false
-endif
+lint: ## Run golint
+	@if ! command -v golint >/dev/null 2>&1; then \
+		echo "golint not found. Installing latest version..."; \
+		go install golang.org/x/lint/golint@latest; \
+	fi
+	golint ./...
+	@echo "✅ Lint passed"
 
-.PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" apply -f -; else echo "No CRDs to install; skipping."; fi
+lint-fix: ## Fix linting issues
+	@echo "Note: golint doesn't support auto-fixing. Running gofmt and goimports instead..."
+	@if ! command -v goimports >/dev/null 2>&1; then \
+		echo "goimports not found. Installing..."; \
+		go install golang.org/x/tools/cmd/goimports@latest; \
+	fi
+	goimports -w .
+	$(GOFMT) ./...
+	@echo "✅ Formatting done"
 
-.PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -; else echo "No CRDs to delete; skipping."; fi
+security: ## Run security checks
+	@if ! command -v gosec >/dev/null 2>&1; then \
+		echo "gosec not found. Installing latest version..."; \
+		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
+	fi
+	gosec ./...
+	@echo "✅ Security checks passed"
 
-.PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
+check: fmt vet lint security ## Run all code quality checks
+	@echo "✅ All checks passed!"
 
-.PHONY: undeploy
-undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+##@ Tool installation
+.PHONY: tools
 
-##@ Dependencies
+tools: ## Install all development tools
+	@echo "Installing development tools..."
+	go install golang.org/x/lint/golint@latest
+	go install golang.org/x/tools/cmd/goimports@latest
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@echo "✅ Tools installed"
 
-## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p "$(LOCALBIN)"
+##@ Build & Release
+.PHONY: cross-build release clean distclean snapshot
 
-## Tool Binaries
-KUBECTL ?= kubectl
-KIND ?= kind
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+cross-build: ## Build for all platforms
+	@echo "Building for multiple platforms..."
+	@mkdir -p $(DIST_DIR)
+	@for os in linux darwin windows; do \
+		for arch in amd64 arm64; do \
+			if [ "$$os" = "windows" ]; then \
+				ext=".exe"; \
+			else \
+				ext=""; \
+			fi; \
+			echo "Building $$os/$$arch..."; \
+			if GOOS=$$os GOARCH=$$arch $(GOBUILD) -trimpath $(LDFLAGS) \
+				-o $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext ./$(CMD_DIR); then \
+				[ "$$os" != "windows" ] && chmod +x $(DIST_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext || true; \
+				echo "  ✅ Success"; \
+			else \
+				echo "  ❌ Failed"; \
+			fi; \
+		done; \
+	done
+	@echo "📦 Builds available in $(DIST_DIR)/"
 
-## Tool Versions
-KUSTOMIZE_VERSION ?= v5.7.1
-CONTROLLER_TOOLS_VERSION ?= v0.19.0
+release: cross-build checksums ## Create release package
+	@echo "Creating release $(VERSION)..."
+	cp README.md LICENSE $(DIST_DIR)/ 2>/dev/null || true
+	@echo "🚀 Release $(VERSION) created in $(DIST_DIR)/"
 
-#ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
-ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
-  [ -n "$$v" ] || { echo "Set ENVTEST_VERSION manually (controller-runtime replace has no tag)" >&2; exit 1; }; \
-  printf '%s\n' "$$v" | sed -E 's/^v?([0-9]+)\.([0-9]+).*/release-\1.\2/')
+checksums: ## Generate checksums for releases
+	@echo "Generating checksums..."
+	cd $(DIST_DIR) && \
+		shasum -a 256 * > sha256sums.txt 2>/dev/null || \
+		sha256sum * > sha256sums.txt 2>/dev/null || true
+	@echo "✅ Checksums generated"
 
-#ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
-ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
-  [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
-  printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
+snapshot: ## Create development snapshot
+	@mkdir -p $(DIST_DIR)
+	$(GOBUILD) -trimpath $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-snapshot ./$(CMD_DIR)
+	chmod +x $(DIST_DIR)/$(BINARY_NAME)-snapshot
+	@echo "📸 Snapshot: $(DIST_DIR)/$(BINARY_NAME)-snapshot"
 
-GOLANGCI_LINT_VERSION ?= v2.5.0
-.PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+##@ Utilities
+.PHONY: help clean
 
-.PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
-	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+clean: ## Clean build artifacts
+	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR) test-backups
+	@echo "🧹 Clean completed"
 
-.PHONY: setup-envtest
-setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.
-	@echo "Setting up envtest binaries for Kubernetes version $(ENVTEST_K8S_VERSION)..."
-	@"$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path || { \
-		echo "Error: Failed to set up envtest binaries for version $(ENVTEST_K8S_VERSION)."; \
-		exit 1; \
-	}
+distclean: clean ## Deep clean (includes dependencies)
+	$(GOCMD) clean -cache -testcache -modcache
+	@echo "🧹 Deep clean completed"
 
-.PHONY: envtest
-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+##@ Documentation
+.PHONY: docs
 
-.PHONY: golangci-lint
-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+docs: ensure-binary ## Generate CLI documentation
+	@mkdir -p docs
+	chmod +x $(BIN_DIR)/$(BINARY_NAME)
+	@if ./$(BIN_DIR)/$(BINARY_NAME) --help > docs/cli-reference.md 2>/dev/null; then \
+		echo "✅ CLI reference generated"; \
+	else \
+		echo "⚠️  Could not generate CLI reference"; \
+		echo "# CLI Reference\n\nCommand not available yet." > docs/cli-reference.md; \
+	fi
+	@if ./$(BIN_DIR)/$(BINARY_NAME) backup --help > docs/backup-command.md 2>/dev/null; then \
+		echo "✅ Backup command help generated"; \
+	else \
+		echo "# Backup Command\n\nBackup command not available yet." > docs/backup-command.md; \
+	fi
+	@if ./$(BIN_DIR)/$(BINARY_NAME) restore --help > docs/restore-command.md 2>/dev/null; then \
+		echo "✅ Restore command help generated"; \
+	else \
+		echo "# Restore Command\n\nRestore command not available yet." > docs/restore-command.md; \
+	fi
+	@echo "📚 Documentation generated in docs/"
 
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
-# $1 - target path with name of binary
-# $2 - package url which can be installed
-# $3 - specific version of package
-define go-install-tool
-@[ -f "$(1)-$(3)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)" ] || { \
-set -e; \
-package=$(2)@$(3) ;\
-echo "Downloading $${package}" ;\
-rm -f "$(1)" ;\
-GOBIN="$(LOCALBIN)" go install $${package} ;\
-mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)" ;\
-} ;\
-ln -sf "$$(realpath "$(1)-$(3)")" "$(1)"
-endef
+##@ Help
+.PHONY: help
 
-define gomodver
-$(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
-endef
+help: ## Display this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make tools      - Install development tools"
+	@echo "  make build      - Build the binary"
+	@echo "  make install    - Install to /usr/local/bin"
+	@echo "  make run ARGS='--help' - Run with arguments"
+	@echo "  make docs       - Generate documentation"
+	@echo "  make test       - Run tests"
+	@echo "  make check      - Run all code quality checks"
