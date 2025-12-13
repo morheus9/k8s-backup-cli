@@ -36,7 +36,7 @@ LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.
 build: ## Build binary for current platform
 	@echo "Building $(BINARY_NAME) $(VERSION) for $(GOOS)/$(GOARCH)..."
 	@mkdir -p $(BIN_DIR)
-	@if $(GOBUILD) -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./$(CMD_DIR); then \
+	@if $(GOBUILD) -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .; then \
 		chmod +x $(BIN_DIR)/$(BINARY_NAME); \
 		echo "✅ Binary created: $(BIN_DIR)/$(BINARY_NAME)"; \
 	else \
