@@ -35,19 +35,27 @@ func ListResources(namespace string, kubeconfigPath string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintf(w, "KIND\tNAME\tNAMESPACE\tAPI VERSION\n")
-	fmt.Fprintf(w, "----\t----\t---------\t-----------\n")
+	if _, err := fmt.Fprintf(w, "KIND\tNAME\tNAMESPACE\tAPI VERSION\n"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintf(w, "----\t----\t---------\t-----------\n"); err != nil {
+		return fmt.Errorf("failed to write separator: %w", err)
+	}
 
 	for _, resource := range resources {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			resource.Kind,
 			resource.Name,
 			resource.Namespace,
 			resource.APIVersion,
-		)
+		); err != nil {
+			return fmt.Errorf("failed to write resource: %w", err)
+		}
 	}
 
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to flush output: %w", err)
+	}
 	fmt.Printf("\nTotal: %d resources\n", len(resources))
 
 	return nil

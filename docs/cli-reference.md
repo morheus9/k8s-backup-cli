@@ -7,7 +7,7 @@ Available Commands:
   backup      Create a backup of Kubernetes resources
   completion  Generate the autocompletion script for the specified shell
   help        Help about any command
-  list        List available backups
+  list        List Kubernetes resources in namespace
   restore     Restore Kubernetes resources from backup
 
 Flags:
