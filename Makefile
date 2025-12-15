@@ -173,7 +173,7 @@ snapshot: ## Create development snapshot
 	@echo "📸 Snapshot: $(DIST_DIR)/$(BINARY_NAME)-snapshot"
 
 ##@ Utilities
-.PHONY: help clean
+.PHONY: help clean uninstall
 
 clean: ## Clean build artifacts
 	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR)
@@ -182,6 +182,20 @@ clean: ## Clean build artifacts
 distclean: clean ## Deep clean (includes dependencies)
 	$(GOCMD) clean -cache -testcache -modcache
 	@echo "🧹 Deep clean completed"
+
+uninstall: ## Uninstall binary from system path
+	@echo "Uninstalling $(BINARY_NAME) from /usr/local/bin..."
+	@if [ -w /usr/local/bin ]; then \
+		rm -f /usr/local/bin/$(BINARY_NAME); \
+	else \
+		sudo rm -f /usr/local/bin/$(BINARY_NAME); \
+	fi
+	@if [ -f /usr/local/bin/$(BINARY_NAME) ]; then \
+		echo "❌ Uninstall failed"; \
+		exit 1; \
+	else \
+		echo "✅ Uninstalled successfully"; \
+	fi
 
 ##@ Documentation
 .PHONY: docs

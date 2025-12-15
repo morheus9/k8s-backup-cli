@@ -14,15 +14,21 @@ var (
 )
 
 var backupCmd = &cobra.Command{
-	Use:   "backup",
+	Use:   "backup [namespace]",
 	Short: "Create a backup of Kubernetes resources",
 	Long:  "Create a tar.gz archive with Kubernetes manifests from the specified namespace",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if backupNamespace == "" {
-			return fmt.Errorf("namespace is required, use --namespace or -n")
+		ns := backupNamespace
+		if len(args) > 0 {
+			ns = args[0]
 		}
 
-		archivePath, err := backup.BackupNamespace(backupNamespace, backupKubeconfigPath)
+		if ns == "" {
+			return fmt.Errorf("namespace is required. Use --namespace flag or provide as argument")
+		}
+
+		archivePath, err := backup.BackupNamespace(ns, backupKubeconfigPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating backup: %v\n", err)
 			os.Exit(1)
@@ -35,7 +41,6 @@ var backupCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(backupCmd)
-	backupCmd.Flags().StringVarP(&backupNamespace, "namespace", "n", "", "Kubernetes namespace to backup (required)")
+	backupCmd.Flags().StringVarP(&backupNamespace, "namespace", "n", "", "Kubernetes namespace to backup")
 	backupCmd.Flags().StringVarP(&backupKubeconfigPath, "kubeconfig", "k", "", "Path to kubeconfig file (default: auto-detect)")
-	_ = backupCmd.MarkFlagRequired("namespace")
 }
