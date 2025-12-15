@@ -16,33 +16,25 @@ type File struct {
 	Data []byte
 }
 
-// validatePath validates the path to prevent path traversal attacks.
-func validatePath(path string) error {
-	// Check for path traversal (..)
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("path contains '..' which is not allowed")
+// validatePath ensures the path is within allowed boundaries
+func validatePath(path string) (string, error) {
+	// Clean the path to resolve any ../ or ./ sequences
+	cleanPath := filepath.Clean(path)
+
+	// Ensure the path doesn't start with .. or /
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		return "", fmt.Errorf("invalid path: %s", path)
 	}
 
-	// Check for absolute paths
-	if filepath.IsAbs(path) {
-		return fmt.Errorf("absolute paths are not allowed")
-	}
-
-	// Check for invalid characters
-	if strings.Contains(path, "\n") || strings.Contains(path, "\r") {
-		return fmt.Errorf("path contains invalid characters")
-	}
-
-	return nil
+	return cleanPath, nil
 }
 
 // CreateArchive creates a tar.gz archive at outputPath containing the provided files.
 func CreateArchive(outputPath string, files []File) error {
-	if err := validatePath(outputPath); err != nil {
-		return fmt.Errorf("invalid output path: %w", err)
-	}
+	// Validate output path
+	outputPath = filepath.Clean(outputPath)
 
-	f, err := os.Create(outputPath) // #nosec G304 -- path is validated above
+	f, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
 	}
@@ -61,16 +53,22 @@ func CreateArchive(outputPath string, files []File) error {
 	}()
 
 	for _, file := range files {
+		// Validate each file name to prevent path traversal
+		cleanName, err := validatePath(file.Name)
+		if err != nil {
+			return fmt.Errorf("invalid filename %s: %w", file.Name, err)
+		}
+
 		hdr := &tar.Header{
-			Name: filepath.ToSlash(file.Name),
+			Name: filepath.ToSlash(cleanName),
 			Mode: 0o644,
 			Size: int64(len(file.Data)),
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
-			return fmt.Errorf("write tar header for %s: %w", file.Name, err)
+			return fmt.Errorf("write tar header for %s: %w", cleanName, err)
 		}
 		if _, err := tw.Write(file.Data); err != nil {
-			return fmt.Errorf("write tar data for %s: %w", file.Name, err)
+			return fmt.Errorf("write tar data for %s: %w", cleanName, err)
 		}
 	}
 
@@ -79,11 +77,10 @@ func CreateArchive(outputPath string, files []File) error {
 
 // ExtractArchive reads a tar.gz archive from path and returns its files.
 func ExtractArchive(path string) ([]File, error) {
-	if err := validatePath(path); err != nil {
-		return nil, fmt.Errorf("invalid archive path: %w", err)
-	}
+	// Validate input path
+	path = filepath.Clean(path)
 
-	f, err := os.Open(path) // #nosec G304 -- path is validated above
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
@@ -111,13 +108,19 @@ func ExtractArchive(path string) ([]File, error) {
 			return nil, fmt.Errorf("read tar header: %w", err)
 		}
 
+		// Validate file names from archive to prevent path traversal
+		cleanName, err := validatePath(hdr.Name)
+		if err != nil {
+			return nil, fmt.Errorf("invalid filename in archive: %s: %w", hdr.Name, err)
+		}
+
 		data, err := io.ReadAll(tr)
 		if err != nil {
-			return nil, fmt.Errorf("read file %s from archive: %w", hdr.Name, err)
+			return nil, fmt.Errorf("read file %s from archive: %w", cleanName, err)
 		}
 
 		out = append(out, File{
-			Name: hdr.Name,
+			Name: cleanName,
 			Data: data,
 		})
 	}
