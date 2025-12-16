@@ -16,9 +16,10 @@ Installing to /usr/local/bin...
 
 kubectl-backup list your_namespace
 ```
-KIND         NAME     NAMESPACE   API VERSION
-----         ----     ---------   -----------
-Deployment   my-app   your_namespace        apps/v1
+KIND         NAME         NAMESPACE           API VERSION
+----         ----         ---------           -----------
+Secret       app-secret   your_namespace      v1
+Deployment   my-app       your_namespace      apps/v1
 
 Total: 1 resources
 ```
